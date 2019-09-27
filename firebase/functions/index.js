@@ -29,11 +29,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         getScore(agent);
     }
 
-    function getScore(agent) {
+    function getScores(agent) {
         //TODO: read from DB
         agent.add(new Card({
             title: `Leaderboard`,
-            text: `Enrique: 1 /n Jose: 2`,
+            text: `Enrique: 1`,
         }));
     }
 
@@ -41,21 +41,32 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         return await slack.users.info({ user });
     };
 
-    function setPlayers(agent) {
-        return new Promise((resolve, reject) => {
+    const persistPlayers = (players, channel) => {
+        return players.map(player => {
+            const created = new Date().getTime();
+            const newPlayer = { created, player, channel, score: 0 }
+            return persist(newPlayer);
+        });
+    }
 
-            (async() => {
-                const res = await slack.channels.info({ channel });
-                const { members } = res.channel;
-                const players = await Promise.all(members.map(user => getMemberInfo(user)));
-                const playersName = players.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
-                const created = new Date().getTime();
-                await firestore.collection(COLLECTION_NAME).add({ created, player: playersName[0], score: 0 });
+    const persist = async player => {
+        return await firestore.collection(COLLECTION_NAME).add(player);
+    }
 
-                agent.add('Done, players have been set. ' + playersName[0]);
-                return resolve();
-            })();
-
+    const setPlayers = agent => {
+        return new Promise(async(resolve, reject) => {
+            const res = await slack.channels.info({ channel });
+            const { members } = res.channel;
+            const players = await Promise.all(members.map(user => getMemberInfo(user)));
+            const playersName = players.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
+            //TODO: discard players already on DB
+            Promise.all(persistPlayers(playersName, channel));
+            agent.add('Done, players have been set');
+            agent.add(new Card({
+                title: `Leaderboard`,
+                text: `Enrique: 1`,
+            }));
+            return resolve();
 
         })
 
@@ -63,7 +74,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
 
     let intentMap = new Map();
     intentMap.set('Set Score Intent', setScore);
-    intentMap.set('Get Score Intent', getScore);
+    intentMap.set('Get Score Intent', getScores);
     intentMap.set('Set Players Intent', setPlayers);
     agent.handleRequest(intentMap);
 });
