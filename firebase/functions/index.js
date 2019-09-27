@@ -56,6 +56,13 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         return playersInline;
     };
 
+    const showLeaderboard = players => {
+        agent.add(new Card({
+            title: `Leaderboard`,
+            text: players.length ? formatPlayersScore(players) : 'No score yet'
+        }));
+    };
+
     function setScore(agent) {
         //TODO: find player and update, return doesn't exists
         agent.add(`N points to ...`);
@@ -64,10 +71,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     const getScore = agent => {
         return new Promise(async(resolve, reject) => {
             const players = await findAll();
-            agent.add(new Card({
-                title: `Leaderboard`,
-                text: players.length ? formatPlayersScore(players) : 'No score yet'
-            }));
+            showLeaderboard(players);
             return resolve();
         });
     }
@@ -78,10 +82,12 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             const { members } = res.channel;
             const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
             const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
-            const players = await findAll();
-            const newPlayers = membersName.filter(name => !players.find(p => p.player == name));
+            const alreadyPlayers = await findAll();
+            const newPlayers = membersName.filter(name => !alreadyPlayers.find(p => p.player == name));
             await Promise.all(persistPlayers(newPlayers, channel));
+            const allPlayers = await findAll();
             agent.add('Done, players have been set');
+            showLeaderboard(allPlayers);
             return resolve();
         });
     }
