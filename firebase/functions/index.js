@@ -48,16 +48,28 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             .catch(err => console.log(err));
     }
 
+    const formatPlayersScore = players => {
+        let playersInline = '';
+        players.forEach(p => {
+            playersInline += `${p.player}: ${p.score} \n`;
+        });
+        return playersInline;
+    };
+
     function setScore(agent) {
         //TODO: find player and update, return doesn't exists
         agent.add(`N points to ...`);
     }
 
     const getScore = agent => {
-        agent.add(new Card({
-            title: `Leaderboard`,
-            text: 'No score yet'
-        }));
+        return new Promise(async(resolve, reject) => {
+            const players = await findAll();
+            agent.add(new Card({
+                title: `Leaderboard`,
+                text: players.length ? formatPlayersScore(players) : 'No score yet'
+            }));
+            return resolve();
+        });
     }
 
     const setPlayers = agent => {
@@ -71,7 +83,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             await Promise.all(persistPlayers(newPlayers, channel));
             agent.add('Done, players have been set');
             return resolve();
-        })
+        });
     }
 
     let intentMap = new Map();
