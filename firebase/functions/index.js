@@ -12,30 +12,15 @@ const COLLECTION_NAME = 'uno-leaderboard';
 
 process.env.DEBUG = 'dialogflow:debug';
 
+const slack = new WebClient(SLACK_TOKEN);
+const firestore = new Firestore({ projectId: FIREBASE_PROJECT_ID });
+
 exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
     const agent = new WebhookClient({ request, response });
-    const slack = new WebClient(SLACK_TOKEN);
-    const firestore = new Firestore({ projectId: FIREBASE_PROJECT_ID });
-
     const { data } = request.body.originalDetectIntentRequest.payload;
     const botUserId = data.authed_users;
     const { event } = data;
     const { channel } = event;
-
-
-    function setScore(agent) {
-        //TODO: find player and update, return doesn't exists
-        agent.add(`Done, I... n points to ...`);
-        getScore(agent);
-    }
-
-    function getScores(agent) {
-        //TODO: read from DB
-        agent.add(new Card({
-            title: `Leaderboard`,
-            text: `Enrique: 1`,
-        }));
-    }
 
     const getMemberInfo = async user => {
         return await slack.users.info({ user });
@@ -53,28 +38,45 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         return await firestore.collection(COLLECTION_NAME).add(player);
     }
 
+    const findAll = () => {
+        return firestore.collection(COLLECTION_NAME).get()
+            .then(snapshot => {
+                const players = [];
+                snapshot.forEach(doc => players.push(doc.data()));
+                return players;
+            })
+            .catch(err => console.log(err));
+    }
+
+    function setScore(agent) {
+        //TODO: find player and update, return doesn't exists
+        agent.add(`N points to ...`);
+    }
+
+    const getScore = agent => {
+        agent.add(new Card({
+            title: `Leaderboard`,
+            text: 'No score yet'
+        }));
+    }
+
     const setPlayers = agent => {
         return new Promise(async(resolve, reject) => {
             const res = await slack.channels.info({ channel });
             const { members } = res.channel;
-            const players = await Promise.all(members.map(user => getMemberInfo(user)));
-            const playersName = players.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
-            //TODO: discard players already on DB
-            Promise.all(persistPlayers(playersName, channel));
+            const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
+            const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
+            const players = await findAll();
+            const newPlayers = membersName.filter(name => !players.find(p => p.player == name));
+            await Promise.all(persistPlayers(newPlayers, channel));
             agent.add('Done, players have been set');
-            agent.add(new Card({
-                title: `Leaderboard`,
-                text: `Enrique: 1`,
-            }));
             return resolve();
-
         })
-
     }
 
     let intentMap = new Map();
     intentMap.set('Set Score Intent', setScore);
-    intentMap.set('Get Score Intent', getScores);
+    intentMap.set('Get Score Intent', getScore);
     intentMap.set('Set Players Intent', setPlayers);
     agent.handleRequest(intentMap);
 });
