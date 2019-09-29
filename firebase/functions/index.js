@@ -2,7 +2,7 @@
 
 const functions = require('firebase-functions');
 const { WebhookClient } = require('dialogflow-fulfillment');
-const { Card, Suggestion } = require('dialogflow-fulfillment');
+const { Card } = require('dialogflow-fulfillment');
 const { WebClient } = require('@slack/web-api');
 const Firestore = require('@google-cloud/firestore');
 
@@ -42,10 +42,25 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         return firestore.collection(COLLECTION_NAME).get()
             .then(snapshot => {
                 const players = [];
-                snapshot.forEach(doc => players.push(doc.data()));
+                snapshot.forEach(doc => {
+                    players.push({ ...doc.data(), id: doc.id });
+                });
                 return players;
             })
             .catch(err => console.log(err));
+    }
+
+    const updateScore = async (points, playerName) => {
+        const players = await findAll();
+        const matches = players.filter(p => p.player.toLowerCase().includes(playerName));        
+        if (matches.length > 0) {
+            const selected = matches[0];
+            const newValues = { ...selected, score: selected.score + points };
+            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);            
+            return selected;
+        } else {
+            return null;
+        }
     }
 
     const formatPlayersScore = players => {
@@ -63,13 +78,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         }));
     };
 
-    function setScore(agent) {
-        //TODO: find player and update, return doesn't exists
-        agent.add(`N points to ...`);
+    const setScore = async agent => {
+        const { Points, Player } = agent.parameters;
+        const updated = await updateScore(Points, Player);        
+        if (updated != null) {
+            agent.add(`${Points} points to ${updated.player}`);
+        } else {
+            agent.add('Invalid player');
+        }
     }
 
     const getScore = agent => {
-        return new Promise(async(resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             const players = await findAll();
             showLeaderboard(players);
             return resolve();
@@ -77,7 +97,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     }
 
     const setPlayers = agent => {
-        return new Promise(async(resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
             const res = await slack.channels.info({ channel });
             const { members } = res.channel;
             const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
