@@ -45,18 +45,18 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
                 snapshot.forEach(doc => {
                     players.push({ ...doc.data(), id: doc.id });
                 });
-                return players;
+                return players.sort((a, b) => a.score < b.score);
             })
             .catch(err => console.log(err));
     }
 
     const updateScore = async (points, playerName) => {
         const players = await findAll();
-        const matches = players.filter(p => p.player.toLowerCase().includes(playerName));        
+        const matches = players.filter(p => p.player.toLowerCase().includes(playerName));
         if (matches.length > 0) {
             const selected = matches[0];
             const newValues = { ...selected, score: selected.score + points };
-            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);            
+            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);
             return selected;
         } else {
             return null;
@@ -80,9 +80,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
 
     const setScore = async agent => {
         const { Points, Player } = agent.parameters;
-        const updated = await updateScore(Points, Player);        
+        const updated = await updateScore(Points, Player);
         if (updated != null) {
             agent.add(`${Points} points to ${updated.player}`);
+            const players = await findAll();
+            showLeaderboard(players);
         } else {
             agent.add('Invalid player');
         }
