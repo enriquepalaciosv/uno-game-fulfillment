@@ -7,8 +7,8 @@ const { WebClient } = require('@slack/web-api');
 const Firestore = require('@google-cloud/firestore');
 
 const SLACK_TOKEN = functions.config().slack.token;
-const FIREBASE_PROJECT_ID = 'uno-evxcyh';
-const COLLECTION_NAME = 'uno-leaderboard';
+const FIREBASE_PROJECT_ID = functions.config().app.project_id;
+const COLLECTION_NAME = functions.config().app.collection_name;;
 
 process.env.DEBUG = 'dialogflow:debug';
 
@@ -50,15 +50,21 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             .catch(err => console.log(err));
     }
 
-    const updateScore = async (points, playerName) => {
-        const players = await findAll();
-        const matches = players.filter(p => p.player.toLowerCase().includes(playerName));
+    const updateScore = async (points, playerName) => {        
+        const players = await findAll();        
+        const matches = players.filter(p => {
+            const name = p.player.toLowerCase();
+            const criteria = playerName.toLowerCase();            
+            return name.includes(criteria);
+        }
+
+        );        
         if (matches.length > 0) {
             const selected = matches[0];
             const newValues = { ...selected, score: selected.score + points };
-            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);
+            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);            
             return selected;
-        } else {
+        } else {            
             return null;
         }
     }
@@ -81,11 +87,11 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     const setScore = async agent => {
         const { Points, Player } = agent.parameters;
         const updated = await updateScore(Points, Player);
-        if (updated != null) {
+        if (updated) {
             agent.add(`${Points} points to ${updated.player}`);
             const players = await findAll();
             showLeaderboard(players);
-        } else {
+        } else {            
             agent.add('Invalid player');
         }
     }
