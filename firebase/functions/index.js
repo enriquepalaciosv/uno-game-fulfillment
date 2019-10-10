@@ -45,26 +45,27 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
                 snapshot.forEach(doc => {
                     players.push({ ...doc.data(), id: doc.id });
                 });
-                return players.sort((a, b) => a.score < b.score);
+                const sorted = players.sort((a, b) => (b.score - a.score));
+                return sorted;
             })
             .catch(err => console.log(err));
     }
 
-    const updateScore = async (points, playerName) => {        
-        const players = await findAll();        
+    const updateScore = async (points, playerName) => {
+        const players = await findAll();
         const matches = players.filter(p => {
             const name = p.player.toLowerCase();
-            const criteria = playerName.toLowerCase();            
+            const criteria = playerName.toLowerCase();
             return name.includes(criteria);
         }
 
-        );        
+        );
         if (matches.length > 0) {
             const selected = matches[0];
             const newValues = { ...selected, score: selected.score + points };
-            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);            
+            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);
             return selected;
-        } else {            
+        } else {
             return null;
         }
     }
@@ -91,7 +92,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             agent.add(`${Points} points to ${updated.player}`);
             const players = await findAll();
             showLeaderboard(players);
-        } else {            
+        } else {
             agent.add('Invalid player');
         }
     }
