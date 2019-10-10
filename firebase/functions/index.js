@@ -20,7 +20,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     const { data } = request.body.originalDetectIntentRequest.payload;
     const botUserId = data.authed_users;
     const { event } = data;
-    const { channel } = event;
+    const { channel, channel_type } = event;
 
     const getMemberInfo = async user => {
         return await slack.users.info({ user });
@@ -78,9 +78,19 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         return playersInline;
     };
 
-    const showLeaderboard = players => {
+    const getChannelInfo = channel => {
+        if (channel_type === 'group') {
+            return slack.groups.info({ channel })
+                .then(res => res.group);
+        } else {
+            return slack.channels.info({ channel })
+                .then(res => res.channel);
+        }
+    };
+
+    const showLeaderboard = (players, channelName) => {
         agent.add(new Card({
-            title: `Leaderboard`,
+            title: `Leaderboard [${channelName}]`,
             text: players.length ? formatPlayersScore(players) : 'No score yet'
         }));
     };
@@ -97,18 +107,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         }
     }
 
-    const getScore = agent => {
-        return new Promise(async (resolve, reject) => {
-            const players = await findAll();
-            showLeaderboard(players);
-            return resolve();
-        });
+    const getScore = async () => {
+        const players = await findAll();
+        const { name } = await getChannelInfo(channel);
+        showLeaderboard(players, name);
     }
 
     const setPlayers = agent => {
         return new Promise(async (resolve, reject) => {
-            const res = await slack.channels.info({ channel });
-            const { members } = res.channel;
+            const res = await getChannelInfo({ channel });
+            const { members, name } = res.channel;
             const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
             const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
             const alreadyPlayers = await findAll();
@@ -116,7 +124,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             await Promise.all(persistPlayers(newPlayers, channel));
             const allPlayers = await findAll();
             agent.add('Done, players have been set');
-            showLeaderboard(allPlayers);
+            showLeaderboard(allPlayers, name);
             return resolve();
         });
     }
