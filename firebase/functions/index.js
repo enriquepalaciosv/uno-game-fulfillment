@@ -57,9 +57,9 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     const updateScore = async (points, playerName) => {
         const players = await findAll();
         const matches = players.filter(p => {
-            const name = p.player.toLowerCase();
-            const criteria = playerName.toLowerCase();
-            return name.includes(criteria);
+            const name = p.player.toLowerCase().trim();
+            const criteria = playerName.toLowerCase().trim();
+            return name.includes(criteria) && p.channel === channel;
         }
 
         );
@@ -106,7 +106,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             const players = await findAll();
             showLeaderboard(players);
         } else {
-            agent.add('Invalid player');
+            agent.add(':no:');
         }
     }
 
