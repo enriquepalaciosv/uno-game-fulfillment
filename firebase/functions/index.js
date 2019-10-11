@@ -43,7 +43,10 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             .then(snapshot => {
                 const players = [];
                 snapshot.forEach(doc => {
-                    players.push({ ...doc.data(), id: doc.id });
+                    var playerData = doc.data();
+                    if (playerData.channel === channel) {
+                        players.push({ ...playerData, id: doc.id });
+                    }
                 });
                 const sorted = players.sort((a, b) => (b.score - a.score));
                 return sorted;
