@@ -102,9 +102,10 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         const { Points, Player } = agent.parameters;
         const updated = await updateScore(Points, Player);
         if (updated) {
+            const { name } = await getChannelInfo(channel);
             agent.add(`${Points} points to ${updated.player}`);
             const players = await findAll();
-            showLeaderboard(players);
+            showLeaderboard(players, name);
         } else {
             agent.add(':no:');
         }
@@ -116,25 +117,26 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         showLeaderboard(players, name);
     }
 
-    const setPlayers = agent => {
-        return new Promise(async (resolve, reject) => {
-            const res = await getChannelInfo({ channel });
-            const { members, name } = res.channel;
-            const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
-            const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
-            const alreadyPlayers = await findAll();
-            const newPlayers = membersName.filter(name => !alreadyPlayers.find(p => p.player == name));
-            await Promise.all(persistPlayers(newPlayers, channel));
-            const allPlayers = await findAll();
-            agent.add('Done, players have been set');
-            showLeaderboard(allPlayers, name);
-            return resolve();
-        });
+    const setPlayers = async agent => {
+        const { name, members } = await getChannelInfo(channel);
+        const membersData = await Promise.all(members.map(user => getMemberInfo(user)));
+        const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
+        const alreadyPlayers = await findAll();
+        const newPlayers = membersName.filter(name => !alreadyPlayers.find(p => p.player == name));
+        await Promise.all(persistPlayers(newPlayers, channel));
+        const allPlayers = await findAll();
+        agent.add('Done, players have been set');
+        showLeaderboard(allPlayers, name);
     }
+
+    const resetLeaderboard = () => {
+        //TODO: implement this
+    };
 
     let intentMap = new Map();
     intentMap.set('Set Score Intent', setScore);
     intentMap.set('Get Score Intent', getScore);
     intentMap.set('Set Players Intent', setPlayers);
+    intentMap.set('Reset Leaderboard - yes', resetLeaderboard);
     agent.handleRequest(intentMap);
 });
