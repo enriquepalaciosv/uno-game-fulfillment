@@ -129,8 +129,16 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         showLeaderboard(allPlayers, name);
     }
 
-    const resetLeaderboard = () => {
-        //TODO: implement this
+    const resetLeaderboard = async agent => {
+        const { name } = await getChannelInfo(channel);
+        const players = await findAll();
+        const updatedPlayes = players.map(p => {
+            const updated = { ...p, score: 0 };
+            firestore.doc(`${COLLECTION_NAME}/${updated.id}`).update(updated);
+            return updated;
+        });
+        agent.add('Well... as you whish. Done!');
+        showLeaderboard(updatedPlayes, name);
     };
 
     let intentMap = new Map();
