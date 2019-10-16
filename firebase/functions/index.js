@@ -1,21 +1,34 @@
 'use strict';
 
-const functions = require('firebase-functions');
-const { WebhookClient } = require('dialogflow-fulfillment');
-const { Card } = require('dialogflow-fulfillment');
+const { WebhookClient, Card } = require('dialogflow-fulfillment');
 const { WebClient } = require('@slack/web-api');
-const Firestore = require('@google-cloud/firestore');
+const awsServerlessExpress = require('aws-serverless-express')
+const aws = require('aws-sdk');
+const express = require('express');
+const bodyParser = require('body-parser');
+const uuidv1 = require('uuid/v1');
 
-const SLACK_TOKEN = functions.config().slack.token;
-const FIREBASE_PROJECT_ID = functions.config().app.project_id;
-const COLLECTION_NAME = functions.config().app.collection_name;;
+const app = express();
+app.use(bodyParser.json())
+app.use(bodyParser.urlencoded({ extended: true }))
 
-process.env.DEBUG = 'dialogflow:debug';
+const ENVIRONMENT = process.env.ENVIRONMENT;
+const AWS_REGION = process.env.AWS_REGION;
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
+const DYNAMO_DB_API_VERSION = process.env.DYNAMO_DB_API_VERSION;
+const COLLECTION_NAME = process.env.DYNAMO_DB_TABLE;
+const SLACK_TOKEN = process.env.SLACK_TOKEN;
 
+if (ENVIRONMENT === 'development') {
+    aws.config.update({ region: AWS_REGION, accessKeyId: AWS_ACCESS_KEY_ID, secretAccessKey: AWS_SECRET_ACCESS_KEY });
+} else {
+    aws.config.update({ region: AWS_REGION });
+}
+const dynamodb = new aws.DynamoDB({ apiVersion: DYNAMO_DB_API_VERSION });
 const slack = new WebClient(SLACK_TOKEN);
-const firestore = new Firestore({ projectId: FIREBASE_PROJECT_ID });
 
-exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, response) => {
+app.use('/', (request, response) => {
     const agent = new WebhookClient({ request, response });
     const { data } = request.body.originalDetectIntentRequest.payload;
     const botUserId = data.authed_users;
@@ -27,31 +40,52 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     };
 
     const persistPlayers = (players, channel) => {
-        return players.map(player => {
-            const created = new Date().getTime();
-            const newPlayer = { created, player, channel, score: 0 }
-            return persist(newPlayer);
+        return new Promise(async (resolve, reject) => {
+            const items = players.map(player => {
+                return {
+                    PutRequest: {
+                        Item: {
+                            "id": { S: uuidv1() },
+                            "channel": { S: channel },
+                            "player": { S: player },
+                            "score": { N: '0' }
+                        }
+                    }
+                }
+            });
+            const params = {
+                RequestItems: { [COLLECTION_NAME]: items }
+            };
+            try {
+                await dynamodb.batchWriteItem(params).promise();
+                resolve();
+            } catch (err) {
+                console.log("DynamoDBerror", err);
+                reject();
+            }
         });
     }
 
-    const persist = async player => {
-        return await firestore.collection(COLLECTION_NAME).add(player);
-    }
-
     const findAll = () => {
-        return firestore.collection(COLLECTION_NAME).get()
-            .then(snapshot => {
-                const players = [];
-                snapshot.forEach(doc => {
-                    var playerData = doc.data();
-                    if (playerData.channel === channel) {
-                        players.push({ ...playerData, id: doc.id });
-                    }
+        return new Promise(async (resolve, reject) => {
+            const params = {
+                ExpressionAttributeValues: { ':channel': { S: channel } },
+                FilterExpression: 'channel = :channel',
+                ProjectionExpression: 'id, channel, player, score',
+                TableName: COLLECTION_NAME
+            };
+            try {
+                const response = await dynamodb.scan(params).promise();
+                const players = response.Items.map(p => {
+                    return { id: p.id.S, score: Number.parseInt(p.score.N), player: p.player.S, channel: p.channel.S };
                 });
                 const sorted = players.sort((a, b) => (b.score - a.score));
-                return sorted;
-            })
-            .catch(err => console.log(err));
+                resolve(sorted);
+            } catch (err) {
+                console.log("DynamoDBerror", err);
+                reject();
+            }
+        });
     }
 
     const updateScore = async (points, playerName) => {
@@ -61,13 +95,25 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
             const criteria = playerName.toLowerCase().trim();
             return name.includes(criteria) && p.channel === channel;
         }
-
         );
         if (matches.length > 0) {
             const selected = matches[0];
-            const newValues = { ...selected, score: selected.score + points };
-            await firestore.doc(`${COLLECTION_NAME}/${selected.id}`).update(newValues);
-            return selected;
+            var params = {
+                TableName: COLLECTION_NAME,
+                Item: {
+                    'score': { N: (selected.score + points).toString() },
+                    'id': { S: selected.id },
+                    'player': { S: selected.player },
+                    'channel': { S: selected.channel }
+                }
+            };
+            try {
+                await dynamodb.putItem(params).promise();
+                return selected;
+            } catch (err) {
+                console.log("DynamoDBerror", err);
+                return null;
+            }
         } else {
             return null;
         }
@@ -123,7 +169,7 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
         const membersName = membersData.filter(p => p.user.id != botUserId).map(p => p.user.real_name);
         const alreadyPlayers = await findAll();
         const newPlayers = membersName.filter(name => !alreadyPlayers.find(p => p.player == name));
-        await Promise.all(persistPlayers(newPlayers, channel));
+        await persistPlayers(newPlayers, channel);
         const allPlayers = await findAll();
         agent.add('Done, players have been set');
         showLeaderboard(allPlayers, name);
@@ -132,19 +178,44 @@ exports.dialogflowFirebaseFulfillment = functions.https.onRequest((request, resp
     const resetLeaderboard = async agent => {
         const { name } = await getChannelInfo(channel);
         const players = await findAll();
-        const updatedPlayes = players.map(p => {
-            const updated = { ...p, score: 0 };
-            firestore.doc(`${COLLECTION_NAME}/${updated.id}`).update(updated);
-            return updated;
+        const items = players.map(p => {
+            return {
+                PutRequest: {
+                    Item: {
+                        "id": { S: p.id },
+                        "channel": { S: p.channel },
+                        "player": { S: p.player },
+                        "score": { N: '0' }
+                    }
+                }
+            }
         });
-        agent.add('Well... as you whish. Done!');
-        showLeaderboard(updatedPlayes, name);
+        const params = {
+            RequestItems: { [COLLECTION_NAME]: items }
+        };
+        try {
+            await dynamodb.batchWriteItem(params).promise();
+            const updatedPlayes = players.map(p => Object.assign({ ...p, score: 0 }, {}));
+            agent.add('Well... as you whish. Done!');
+            showLeaderboard(updatedPlayes, name);
+        } catch (err) {
+            console.log("DynamoDBerror", err);
+            agent.add(':no:');
+        }
     };
 
-    let intentMap = new Map();
+    const intentMap = new Map();
     intentMap.set('Set Score Intent', setScore);
     intentMap.set('Get Score Intent', getScore);
     intentMap.set('Set Players Intent', setPlayers);
     intentMap.set('Reset Leaderboard - yes', resetLeaderboard);
     agent.handleRequest(intentMap);
 });
+
+if (ENVIRONMENT === 'development') {
+    const PORT = process.env.PORT || 8080;
+    app.listen(PORT, () => console.log(`App listening on port ${PORT}`));
+}
+
+const server = awsServerlessExpress.createServer(app);
+exports.handler = (event, context) => { awsServerlessExpress.proxy(server, event, context) }
