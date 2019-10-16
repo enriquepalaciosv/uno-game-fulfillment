@@ -1,16 +1,15 @@
 {
-    "name": "dialogflowFirebaseFulfillment",
-    "description": "This is the default fulfillment for a Dialogflow agents using Cloud Functions for Firebase",
+    "name": "ns-uno-fulfillment",
+    "description": "This is the serverless fulfillment for UNO game",
     "version": "0.0.1",
     "private": true,
     "license": "Apache Version 2.0",
-    "author": "Google Inc.",
+    "author": "Enrique Palacios",
     "engines": {
         "node": "~10.0.0"
     },
     "scripts": {
-        "start": "firebase serve --only functions:dialogflowFirebaseFulfillment",
-        "deploy": "firebase deploy --only functions:dialogflowFirebaseFulfillment"
+        "start": "node index.js"
     },
     "dependencies": {
         "@slack/web-api": "^5.2.0",
